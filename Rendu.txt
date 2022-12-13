@@ -1,0 +1,124 @@
+ID du cluster : /subscriptions/62229cd0-2ef4-4900-9cc3-0780b46d6178/resourcegroups/rg-tp4-kubernetes/providers/Microsoft.ContainerService/managedClusters/aks-tp4
+
+
+Expliquer les commandes avec Helm
+
+//curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+avec cette commande on installe Helm
+
+//helm version
+On vérifie que Helm est bien installé
+
+//helm repo add bitnami https://charts.bitnami.com/bitnami
+On télécharge le repo Bitnami contenant le Chart MongoDB sur le cluster
+
+On installe ensuite le chart MongoDB via cette commande
+//helm install mongodb bitnami/mongodb -n mongodb --create-namespace
+
+bitnami/mongodb : emplacement du fichier
+-n : permet de spécifier le nom du namespace, ici mongodb
+
+
+//kubectl get all,secrets,cm -n mongodb
+permet de lister les différentes resources créées par la commande ci-dessus, notamment les secrets et configMap contenant le nom MongoDB
+
+
+//kubectl port-forward --namespace mongodb svc/mongodb 27017:27017
+Permet de rediriger les requêtes des ports de la machine locale vers le cluster
+
+//kubectl get secret --namespace mongodb mongodb -o jsonpath="{.data.mongodb-root-password}" | base64 -d
+Cette commande permet de récupérerer le mot de passe de l'utilisateur root
+
+On utilise ensuite le mot de passe dans cette commande permettant de se connecter à la base de données MongoDB
+//mongodb://root:<PASSWORD>@localhost:27017
+
+
+1) Déploiement de l'api sur le cluster
+
+On crée un fichier api-deployment.yaml, en indiquant notamment :
+- le nombre de replicas(nombre de pod créés) : 1
+- le nom de l'image : yrez/ynov-api:latest
+- le port du container : 3000
+
+Une fois le fichier complété, on lance la création de la ressource via la commande
+//kubectl apply -f api-deployment.yaml
+La ressource a son tour crée le pod
+
+kubectl get all //permet d'afficher les ressources
+kubectl describe deployment //permet d'inspecter deployment
+kubectl describe pods
+
+Pour accéder aux logs du pod, on tape cette commande 
+//kubectl logs -n default deployment/api-deployment -f
+
+avec 
+- api-deployment étant le nom du déploiement
+
+On comprend grâce aux logs que l'api n'arrive pas à se connecter à la base de donnée ici MongoDB, l'api a besoin d'une connexion à une base de donnée pour démarrer, hors on ne lui a pour l'instant pas communiqué l'URL
+
+
+2) Connexion de l'API à MongoDB
+
+kubectl create secret generic mongodb-uri \
+    --from-literal=mongodb-uri=mongodb://root:aRYIgmjckS@mongodb.mongodb:27017 \
+Permet de sauvegarder mongodb-uri dans un secret
+-------------------------------------------------------------------------------------------------
+=======================================================================================================> Expliquer pourquoi mongodb.mongodb , dans la ligne du dessus
+-------------------------------------------------------------------------------------------------
+
+On ajoute ensuite le secret dans le fichier de déploiement api-deployment.yaml dans la partie env,
+on éxécute ensuite de nouveau la commande permettant de créer la ressource
+//kubectl logs -n default deployment/api-deployment -f
+
+Cette fois, le Pod run correctement
+
+
+
+
+3) Exposer l'API à l'intérieur du cluster à l'aide d'un service
+
+On va ici créer un service permettant d'accèder aux pods à partir d'un nom unique, pour ce faire on crée un fichier de configuration du service api-service.yaml
+On renseigne notamment :
+- l'app : api : qui correspond à l'app spécifiée dans le fichier api-deployment.yaml
+- le protocole de connexion : TCP
+- le port permettant de communiquer : 3000
+
+On crée ensuite le service avec la commande
+//kubectl apply -f api-service.yaml
+
+4) Augmenter le nombre de replicas de l'api
+
+Dans le fichier api-deployment.yaml on change la valeur de replicas de 1 à 5
+On lance ensuite la commande permettant d'éxécuter le déploiement
+//kubectl apply -f api-deployment.yaml
+
+5) Installer l'Ingress Controller NGINX
+
+On ajoute le repo avec la commande suivante
+//helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+
+On installe ensuite le Chart avec la commande
+//helm install ingress-nginx ingress-nginx/ingress-nginx
+on ne crée pas de namespace ici
+La commande crée :
+- un deployment
+- un service
+- deux secrets
+- un pod
+- une configmap
+
+Toutes ces ressources sont créées dans le default namespace
+
+
+6)
+Pour exposer l'api, on crée un fichier api-ingress.yaml
+
+On éxécute ensuite la commande
+//kubectl apply -f api-ingress.yaml
+
+L'api est désormais accessible depuis le hostname configuré dans le fichier api-ingress.yaml
+
+
+
+Pour le schéma : 
+Ingress Controller > ServiceApi > Requete Pod > Mongodb
